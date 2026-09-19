@@ -20,7 +20,7 @@ POST /api/obfuscate
 - [ข้อจำกัด (อ่านก่อนใช้)](#ข้อจำกัด-อ่านก่อนใช้)
 - [Deploy ขึ้น Vercel](#deploy-ขึ้น-vercel)
 - [โครงสร้างรีโพ](#โครงสร้างรีโพ)
-- [บั๊ก 2 ตัวที่แก้เพื่อให้รันบน Linux ได้](#บั๊ก-2-ตัวที่แก้เพื่อให้รันบน-linux-ได้)
+- [ปัญหา 3 ตัวที่แก้เพื่อให้รันบน Linux/Vercel ได้](#ปัญหา-3-ตัวที่แก้เพื่อให้รันบน-linuxvercel-ได้)
 - [Build ไบนารีใหม่จากซอร์ส](#build-ไบนารีใหม่จากซอร์ส)
 - [สถาปัตยกรรม: ทำไมต้องมีไบนารี .NET](#สถาปัตยกรรม-ทำไมต้องมีไบนารี-net)
 - [แหล่งที่มาของไฟล์ third-party](#ที่มาของไฟล์-third-party)
@@ -31,21 +31,21 @@ POST /api/obfuscate
 
 ```bash
 # แบบ JSON
-curl -X POST https://<your-app>.vercel.app/api/obfuscate \
+curl -X POST https://obf9ms.vercel.app/api/obfuscate \
   -H 'content-type: application/json' \
   -d '{"code":"local a = 1\nprint(a + 41)"}'
 
 # รับเป็นไฟล์ .lua ตรงๆ
-curl -X POST https://<your-app>.vercel.app/api/obfuscate \
+curl -X POST https://obf9ms.vercel.app/api/obfuscate \
   -H 'content-type: application/json' \
   -d '{"code":"print(1)","download":true,"filename":"out.lua"}' \
   -o out.lua
 
 # ดูเอกสาร endpoint
-curl https://<your-app>.vercel.app/api/obfuscate
+curl https://obf9ms.vercel.app/api/obfuscate
 
 # เช็คสุขภาพรันไทม์ (obfuscate จริง 1 ครั้ง แล้วรายงานว่าไบนารี/ไลบรารีครบไหม)
-curl 'https://<your-app>.vercel.app/api/obfuscate?health=1'
+curl 'https://obf9ms.vercel.app/api/obfuscate?health=1'
 ```
 
 จาก JavaScript:
@@ -145,7 +145,7 @@ vercel deploy --prod
 **เช็คหลัง deploy:**
 
 ```bash
-curl 'https://<your-app>.vercel.app/api/obfuscate?health=1'
+curl 'https://obf9ms.vercel.app/api/obfuscate?health=1'
 ```
 
 ต้องได้ `"ok": true` และ `selfTest.ok: true`
@@ -204,10 +204,11 @@ solution ตรงๆ ไม่ได้ — ไลบรารี `77main` ต�
 
 ---
 
-## บั๊ก 2 ตัวที่แก้เพื่อให้รันบน Linux ได้
+## ปัญหา 3 ตัวที่แก้เพื่อให้รันบน Linux/Vercel ได้
 
-ซอร์สต้นฉบับ build ผ่านบน Windows แต่**ถอด bytecode เพี้ยนทั้งหมด**เมื่อรันบน .NET 8/Linux
-สาเหตุมี 2 จุด ซึ่งแก้ไว้ใน `src/77fuscator-src/77main/` แล้ว
+ข้อ 1–2 คือบั๊กในซอร์สต้นฉบับ ซึ่ง build ผ่านบน Windows แต่**ถอด bytecode เพี้ยนทั้งหมด**
+เมื่อรันบน .NET 8/Linux — แก้ไว้ใน `src/77fuscator-src/77main/` แล้ว
+ข้อ 3 เป็นกับดักตอน cross-build สำหรับ Vercel
 
 ### 1. `Bytecode Library/Bytecode/Opcode.cs` — enum เรียงไม่ตรง Lua 5.1
 
@@ -269,6 +270,51 @@ _bigEndian = (ReadByte() == 1) != BitConverter.IsLittleEndian;
 > ส่วนที่ **ไม่ได้** แก้อีกจุด: `Encoding.GetEncoding(28591)` ถูกเรียก 9 แห่งแต่ไม่มีที่ไหน
 > ลงทะเบียน `CodePagesEncodingProvider` ซึ่งจะทำให้ throw บน .NET Core — แก้ที่
 > `src/obf77-cli/Program.cs` แทน เพื่อไม่ต้องแตะซอร์สเดิม
+### 3. `api/vendor/libLuaCompiler-O.so` — ต้องคอมไพล์ให้เก่ากว่า glibc ของ Vercel
+
+อันนี้ไม่ใช่บั๊กในซอร์ส แต่เป็นกับดักตอน build
+
+รอบแรกคอมไพล์ Lua 5.1.5 ด้วย `gcc` บน Debian 13 (glibc 2.41) แล้ว deploy ขึ้น Vercel
+ผลคือ health check รายงาน:
+
+```
+System.DllNotFoundException: Unable to load shared library 'LuaCompiler-O.dll'
+   or one of its dependencies.
+```
+
+ทั้งที่ไฟล์อยู่ครบและ symlink ใช้ได้ — สาเหตุคือ symbol versioning:
+
+| ไฟล์ | ต้องการ GLIBC สูงสุด | รันบน Vercel |
+|---|---|---|
+| `obf77` (.NET) | 2.16 | ✅ Microsoft บิลด์แบบ portable |
+| `darklua` | 2.34 | ✅ |
+| `libLuaCompiler-O.so` (gcc/Debian 13) | **2.38** | ❌ |
+
+symbol ตัวปัญหา คือ `fmod@GLIBC_2.38`, `exp`/`log`/`pow@GLIBC_2.29`,
+`dlopen`/`dlsym`/`dlerror`/`dlclose@GLIBC_2.34` — glibc 2.34 รวม libdl เข้า libc
+และ 2.38 เพิ่ม `fmod` เวอร์ชันใหม่ ทำให้คอมไพล์บนดิสโทรใหม่แล้ว bind ไปหาเวอร์ชันใหม่โดยอัตโนมัติ
+
+Vercel ใช้ Amazon Linux ที่มี glibc 2.34 → โหลด `.so` ที่ต้องการ 2.38 ไม่ได้
+
+**การแก้:** คอมไพล์ด้วย `zig cc` ซึ่งกำหนด glibc floor ได้ตรงๆ
+
+```bash
+zig cc -target x86_64-linux-gnu.2.26 -O2 -fPIC -DLUA_USE_LINUX -c <file>.c
+zig cc -target x86_64-linux-gnu.2.26 -shared -fPIC -o libLuaCompiler-O.so *.o -lm -ldl
+objcopy --strip-debug libLuaCompiler-O.so   # 819 KB -> 218 KB
+```
+
+ผล: ต้องการแค่ **GLIBC_2.14** (จาก 2.38) และ export ครบทั้ง 26 symbol ที่ `Natives.cs` ใช้
+
+`scripts/build-linux.sh` ทำทั้งหมดนี้ให้แล้ว รวมถึง **ตรวจอัตโนมัติ** ว่า
+`.so` ไม่ต้องการ glibc เกิน 2.34 และ symbol ครบ — ถ้าไม่ผ่านจะ `die` ทันที
+
+> เช็คเองได้ว่าไฟล์ที่กำลังจะ deploy ต้องการ glibc เท่าไหร่:
+> ```bash
+> readelf --dyn-syms -W api/vendor/libLuaCompiler-O.so | grep -oE 'GLIBC_[0-9.]+' | sort -uV
+> ```
+> และดูว่า Vercel ที่ deploy ไปใช้ glibc อะไรจาก `GET /api/obfuscate?health=1` (ฟิลด์ `glibc`)
+
 
 ---
 

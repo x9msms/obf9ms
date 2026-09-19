@@ -14,6 +14,9 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENDOR="$REPO_ROOT/api/vendor"
 CLI_PROJ="$REPO_ROOT/src/obf77-cli/obf77-cli.csproj"
 LUA_VERSION="5.1.5"
+# Floor for the Lua shared library. Vercel's Amazon Linux runtime provides
+# glibc 2.34; building against 2.26 keeps a wide margin.
+LUA_GLIBC_TARGET="2.26"
 DARKLUA_VERSION="0.19.0"
 WORK="${TMPDIR:-/tmp}/obf9ms-build.$$"
 
@@ -63,24 +66,75 @@ printf '    obf77  %s\n' "$(du -h "$VENDOR/obf77" | cut -f1)"
 # with the original archive is just Lua 5.1.5 recompiled - its bytecode is
 # byte-identical to `luac` 5.1.5 apart from a stripped source name and no debug
 # info - so a plain Linux build of 5.1.5 is a drop-in replacement.
-say "Building Lua $LUA_VERSION as libLuaCompiler-O.so"
+#
+# IMPORTANT: it must be built against an OLD glibc. Compiling with the host gcc
+# on a recent distro binds fmod@GLIBC_2.38 / exp,log,pow@GLIBC_2.29 /
+# dlopen@GLIBC_2.34, and then dlopen() fails on Vercel's Amazon Linux runtime
+# with "Unable to load shared library 'LuaCompiler-O.dll'". We use `zig cc`
+# with an explicit glibc floor so the result only needs GLIBC_2.14.
+#
+# Fallback: if zig is unavailable, build with the host gcc and check the
+# `readelf` output printed at the end - anything above GLIBC_2.34 will not load
+# on Vercel.
+say "Building Lua $LUA_VERSION as libLuaCompiler-O.so (target glibc $LUA_GLIBC_TARGET)"
 curl -sSL "https://www.lua.org/ftp/lua-$LUA_VERSION.tar.gz" -o "$WORK/lua.tar.gz"
 tar -xzf "$WORK/lua.tar.gz" -C "$WORK"
 mkdir -p "$WORK/objs"
 cd "$WORK/lua-$LUA_VERSION/src"
+
+ZIG=""
+if command -v zig >/dev/null 2>&1; then
+  ZIG="zig"
+elif [ -x "$HOME/zig/zig" ]; then
+  ZIG="$HOME/zig/zig"
+fi
+
+if [ -n "$ZIG" ]; then
+  CC=("$ZIG" cc -target "x86_64-linux-gnu.$LUA_GLIBC_TARGET")
+  printf '    using zig cc -target x86_64-linux-gnu.%s\n' "$LUA_GLIBC_TARGET"
+else
+  CC=(gcc)
+  printf '    \033[1;33mzig not found - falling back to host gcc.\033[0m\n'
+  printf '    Install zig to get a portable .so:  https://ziglang.org/download/\n'
+fi
+
 for f in l*.c lauxlib.c linit.c; do
   case "$f" in lua.c|luac.c|print.c) continue ;; esac
-  gcc -O2 -fPIC -DLUA_USE_LINUX -c "$f" -o "$WORK/objs/${f%.c}.o"
+  "${CC[@]}" -O2 -fPIC -DLUA_USE_LINUX -c "$f" -o "$WORK/objs/${f%.c}.o"
 done
-gcc -shared -o "$WORK/libLuaCompiler-O.so" "$WORK/objs"/*.o -ldl -lm
-install -m 0755 "$WORK/libLuaCompiler-O.so" "$VENDOR/libLuaCompiler-O.so"
+"${CC[@]}" -shared -fPIC -o "$WORK/libLuaCompiler-O.so" "$WORK/objs"/*.o -lm -ldl
+objcopy --strip-debug "$WORK/libLuaCompiler-O.so" "$WORK/libLuaCompiler-O.stripped.so" \
+  || cp "$WORK/libLuaCompiler-O.so" "$WORK/libLuaCompiler-O.stripped.so"
+install -m 0755 "$WORK/libLuaCompiler-O.stripped.so" "$VENDOR/libLuaCompiler-O.so"
 cd "$REPO_ROOT"
 
 # .NET's native library probing does NOT append ".so" to a name that already
 # ends in ".dll", so keep the exact DllImport name as a symlink next to the
 # binary. Git stores symlinks, so this survives clone/deploy.
 ln -sf libLuaCompiler-O.so "$VENDOR/LuaCompiler-O.dll"
+
 printf '    libLuaCompiler-O.so  %s\n' "$(du -h "$VENDOR/libLuaCompiler-O.so" | cut -f1)"
+printf '    requires glibc: %s\n' \
+  "$(readelf --dyn-syms -W "$VENDOR/libLuaCompiler-O.so" 2>/dev/null \
+     | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -uV | tr '\n' ' ')"
+if readelf --dyn-syms -W "$VENDOR/libLuaCompiler-O.so" 2>/dev/null | grep -qE 'GLIBC_2\.(3[5-9]|[4-9][0-9])'; then
+  die "libLuaCompiler-O.so needs glibc newer than 2.34 - it will NOT load on Vercel.
+Rebuild it with zig:  zig cc -target x86_64-linux-gnu.2.26 ..."
+fi
+
+# Also verify the 26 symbols Natives.cs imports are all exported.
+MISSING=0
+for sym in luaL_callmeta luaL_loadbuffer luaL_newstate luaL_openlibs luaL_ref \
+           lua_call lua_close lua_getfield lua_gettop lua_next lua_pushboolean \
+           lua_pushcclosure lua_pushlstring lua_pushnil lua_pushnumber lua_pushvalue \
+           lua_rawgeti lua_setfield lua_settop lua_toboolean lua_tolstring lua_tonumber \
+           lua_topointer lua_tothread lua_touserdata lua_type; do
+  readelf --dyn-syms -W "$VENDOR/libLuaCompiler-O.so" | grep -qw "$sym" || {
+    printf '    \033[1;31mmissing symbol: %s\033[0m\n' "$sym"; MISSING=$((MISSING+1));
+  }
+done
+[ "$MISSING" -eq 0 ] || die "$MISSING required Lua C API symbols are missing"
+printf '    all 26 Lua C API symbols exported\n'
 
 # ------------------------------------------------------------- 3) darklua
 say "Downloading darklua $DARKLUA_VERSION (linux-x86_64)"

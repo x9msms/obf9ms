@@ -1,7 +1,8 @@
 // Minimal stand-in for the Vercel Node runtime so the API handler can be
 // exercised locally: wraps http.ServerResponse with .status() / .json() / .send()
 const http = require('http');
-const handler = require('/home/user/obf9ms/api/obfuscate.js');
+const path = require('path');
+const handler = require(path.join(__dirname, '..', 'api', 'obfuscate.js'));
 
 function wrap(res) {
   res.statusCode = 200;

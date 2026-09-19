@@ -109,7 +109,7 @@ module.exports = async function handler(req, res) {
         error: classified.message,
         // Only surface internals on 5xx - a syntax problem in the user's own
         // script should not leak .NET stack frames.
-        ...(classified.status >= 500 ? { detail: (result.stderr || '').slice(-2000) } : {}),
+        ...(classified.status >= 500 ? { detail: (result.stderr || '').slice(-6000) } : {}),
         elapsedMs: Date.now() - started,
       });
     }
@@ -270,6 +270,12 @@ function runObfuscator(bin, work, inputFile, outputFile, settingsFile) {
         cwd: work,
         env: {
           PATH: `${VENDOR}:${process.env.PATH || '/usr/bin:/bin'}`,
+          // The .NET single-file host extracts its bundle to DOTNET_BUNDLE_EXTRACT_BASE_DIR
+          // and reports THAT as AppContext.BaseDirectory, so the native-library probe
+          // for "LuaCompiler-O.dll" does not look next to the real binary. Put the
+          // vendor dir on the loader search path as well - the LuaCompiler-O.dll
+          // symlink living there is what actually gets opened.
+          LD_LIBRARY_PATH: [VENDOR, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':'),
           HOME: work,
           TMPDIR: work,
           DOTNET_ROOT: '',
@@ -328,6 +334,7 @@ async function healthCheck() {
     vendorDir: VENDOR,
     node: process.version,
     platform: `${process.platform}/${process.arch}`,
+    glibc: detectGlibc(),
     checks: {},
   };
   for (const f of ['obf77', 'darklua', 'darkluaconfig.json', 'libLuaCompiler-O.so', 'LuaCompiler-O.dll']) {
@@ -363,6 +370,22 @@ async function healthCheck() {
     if (work) fs.rmSync(work, { recursive: true, force: true });
   }
   return report;
+}
+
+/**
+ * Reports the loader/glibc version of the runtime we landed on. The Lua 5.1
+ * shared library in ./vendor is built for glibc 2.14+ so it loads anywhere,
+ * but darklua needs 2.34 - this makes a base-image change easy to spot.
+ */
+function detectGlibc() {
+  try {
+    const { execFileSync } = require('child_process');
+    const out = execFileSync('ldd', ['--version'], { encoding: 'utf8', timeout: 5000 });
+    const m = out.match(/(\d+\.\d+)/);
+    return m ? m[1] : out.split('\n')[0].slice(0, 120);
+  } catch (e) {
+    return 'unknown (' + (e && e.message ? e.message.slice(0, 80) : 'n/a') + ')';
+  }
 }
 
 function usage() {
