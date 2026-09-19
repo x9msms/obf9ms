@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>obf9ms — 77fuscator API</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#131824; --panel2:#0f1420; --line:#232c3d;
+    --fg:#e6edf7; --dim:#8b98ad; --acc:#5eead4; --acc2:#818cf8; --err:#fb7185; --ok:#4ade80;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font:15px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans Thai",sans-serif;
+  }
+  .wrap{max-width:1100px;margin:0 auto;padding:32px 20px 64px}
+  header{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:8px}
+  h1{margin:0;font-size:30px;letter-spacing:-.02em}
+  h1 span{background:linear-gradient(90deg,var(--acc),var(--acc2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{color:var(--dim);margin:6px 0 28px;max-width:70ch}
+  .pill{font-size:12px;padding:4px 10px;border:1px solid var(--line);border-radius:999px;color:var(--dim);background:var(--panel2);white-space:nowrap}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:860px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .card h2{margin:0;padding:12px 16px;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);border-bottom:1px solid var(--line);background:var(--panel2);display:flex;justify-content:space-between;align-items:center;gap:8px}
+  textarea{
+    width:100%;min-height:320px;resize:vertical;border:0;outline:0;background:var(--panel);color:var(--fg);
+    font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;padding:14px 16px;
+  }
+  pre#out{
+    margin:0;padding:14px 16px;min-height:320px;max-height:520px;overflow:auto;white-space:pre-wrap;word-break:break-all;
+    font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--dim);
+  }
+  .bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:18px 0 26px}
+  button{
+    font:inherit;font-weight:600;padding:10px 18px;border-radius:10px;cursor:pointer;
+    border:1px solid transparent;background:linear-gradient(90deg,var(--acc),var(--acc2));color:#08111f;
+  }
+  button.ghost{background:var(--panel2);color:var(--fg);border-color:var(--line)}
+  button:disabled{opacity:.5;cursor:progress}
+  .row{display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+  label.ck{display:flex;gap:7px;align-items:center;color:var(--dim);font-size:13.5px;cursor:pointer}
+  label.ck input{accent-color:var(--acc)}
+  .wm{display:flex;gap:8px;align-items:center;color:var(--dim);font-size:13.5px}
+  input[type=text],input[type=number]{
+    background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:6px 10px;font:inherit;font-size:13.5px;
+  }
+  input[type=text]{min-width:260px}
+  .status{font-size:13.5px;color:var(--dim)}
+  .status.ok{color:var(--ok)} .status.err{color:var(--err)}
+  .stats{display:flex;gap:18px;flex-wrap:wrap;margin-top:14px;font-size:13px;color:var(--dim)}
+  .stats b{color:var(--fg);font-weight:600}
+  details{margin-top:26px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:0 16px}
+  summary{cursor:pointer;padding:14px 0;font-weight:600}
+  code,pre.code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  pre.code{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;overflow:auto;font-size:12.5px;color:var(--fg)}
+  a{color:var(--acc)}
+  .note{font-size:13px;color:var(--dim);margin:10px 0 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1><span>obf9ms</span> — 77fuscator API</h1>
+      <div class="sub">
+        Lua 5.1 obfuscator (C#/.NET&nbsp;8 + darklua) รันเป็น Vercel Serverless Function
+        ผ่านการแปลงเป็น virtual machine bytecode, เข้ารหัส string และทำ control-flow flattening
+      </div>
+    </div>
+    <div class="pill" id="engine">engine: loading…</div>
+  </header>
+
+  <div class="row">
+    <label class="ck"><input type="checkbox" id="s_encrypt" checked> EncryptStrings</label>
+    <label class="ck"><input type="checkbox" id="s_compress" checked> ExtraCompression</label>
+    <label class="ck"><input type="checkbox" id="s_security" checked> EnhancedSecurity</label>
+    <label class="ck"><input type="checkbox" id="s_dynamic"> DynamicOpcodeStructure</label>
+    <span class="wm">TableLen <input type="number" id="s_tablelen" value="500" min="1" max="4096" style="width:86px"></span>
+  </div>
+  <div class="row">
+    <span class="wm">Watermark <input type="text" id="s_watermark" value="77fuscator 0.6.1 EARLY BUILD"></span>
+  </div>
+
+  <div class="bar">
+    <button id="go">Obfuscate</button>
+    <button class="ghost" id="dl" disabled>Download .lua</button>
+    <button class="ghost" id="sample">Load sample</button>
+    <span class="status" id="status">พร้อมใช้งาน</span>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Input — Lua source <span id="insize"></span></h2>
+      <textarea id="in" spellcheck="false">local playerName = "Builderman"
+
+local function greet(who)
+    return "Hello, " .. who .. "!"
+end
+
+print(greet(playerName))
+
+for i = 1, 3 do
+    print(i * 2)
+end
+</textarea>
+    </div>
+    <div class="card">
+      <h2>Output — obfuscated <span id="outsize"></span></h2>
+      <pre id="out">กดปุ่ม Obfuscate เพื่อเริ่ม…</pre>
+    </div>
+  </div>
+
+  <div class="stats" id="stats"></div>
+
+  <details>
+    <summary>เรียกใช้ API ตรงๆ (curl / fetch)</summary>
+    <pre class="code">curl -X POST https://&lt;your-app&gt;.vercel.app/api/obfuscate \
+  -H 'content-type: application/json' \
+  -d '{"code":"print(1+1)"}'</pre>
+    <pre class="code">const r = await fetch('/api/obfuscate', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ code: 'print(1+1)' })
+});
+const { ok, code: obfuscated } = await r.json();</pre>
+    <p class="note">
+      เพิ่ม <code>"download": true</code> ใน body เพื่อรับเป็นไฟล์ <code>.lua</code> ดิบแทน JSON ·
+      เช็คสถานะรันไทม์ได้ที่ <code>GET /api/obfuscate?health=1</code>
+    </p>
+  </details>
+
+  <details>
+    <summary>ข้อจำกัดที่ควรรู้</summary>
+    <ul class="note" style="line-height:1.9">
+      <li><b>ขนาด input สูงสุด 512 KB</b> (body limit ของ Vercel คือ 4.5 MB แต่ตั้งเผื่อไว้)</li>
+      <li><b>เวลา</b> — script เล็กใช้เวลา ~3.5 วินาทีรวม .NET cold start · Vercel Hobby จำกัดที่ 10 วินาที (Pro ถึงจะได้ 60 วิตามที่ตั้งไว้ใน <code>maxDuration</code>)</li>
+      <li><b>Lua 5.1 รับ local ได้สูงสุด 200 ตัวต่อฟังก์ชัน</b> — เกินนี้จะขึ้น <code>main function has more than 200 local variables</code> ซึ่งเป็นข้อจำกัดของตัวภาษาเอง ไม่ใช่บั๊ก</li>
+      <li>output เป็น VM bytecode ที่ต้องรันบน Lua 5.1 / Luau ที่มี <code>getfenv</code>, <code>bit32</code> หรือ <code>bit</code></li>
+    </ul>
+  </details>
+</div>
+
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var lastCode = '';
+
+  function fmt(n){ return n < 1024 ? n + ' B' : n < 1048576 ? (n/1024).toFixed(1) + ' KB' : (n/1048576).toFixed(2) + ' MB'; }
+  function setStatus(msg, cls){ var s = $('status'); s.textContent = msg; s.className = 'status' + (cls ? ' ' + cls : ''); }
+
+  function syncIn(){ $('insize').textContent = fmt(new Blob([$('in').value]).size); }
+  $('in').addEventListener('input', syncIn); syncIn();
+
+  $('sample').addEventListener('click', function(){
+    $('in').value = [
+      'local Config = {',
+      '    prefix = "!",',
+      '    maxRetries = 3,',
+      '    endpoints = { "/api/login", "/api/data" }',
+      '}',
+      '',
+      'local function request(url, attempt)',
+      '    attempt = attempt or 1',
+      '    local ok, res = pcall(function() return game:HttpGet(url) end)',
+      '    if not ok and attempt < Config.maxRetries then',
+      '        return request(url, attempt + 1)',
+      '    end',
+      '    return res',
+      'end',
+      '',
+      'for _, ep in ipairs(Config.endpoints) do',
+      '    print(Config.prefix .. ep, request(ep))',
+      'end'
+    ].join('\n');
+    syncIn();
+  });
+
+  function settings(){
+    return {
+      EncryptStrings: $('s_encrypt').checked,
+      ExtraCompression: $('s_compress').checked,
+      EnhancedSecurity: $('s_security').checked,
+      DynamicOpcodeStructure: $('s_dynamic').checked,
+      DecryptTableLen: parseInt($('s_tablelen').value, 10) || 500,
+      Watermark: $('s_watermark').value
+    };
+  }
+
+  $('go').addEventListener('click', async function(){
+    var code = $('in').value;
+    if (!code.trim()){ setStatus('ไม่มีโค้ดให้ obfuscate', 'err'); return; }
+
+    $('go').disabled = true; $('dl').disabled = true;
+    $('out').textContent = ''; $('stats').textContent = '';
+    setStatus('กำลัง obfuscate… (ปกติใช้เวลา 3–6 วินาที)');
+    var t0 = performance.now();
+
+    try {
+      var res = await fetch('api/obfuscate', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code: code, settings: settings() })
+      });
+      var data = await res.json();
+      var ms = Math.round(performance.now() - t0);
+
+      if (!res.ok || !data.ok){
+        $('out').textContent = (data && (data.error || data.message)) || ('HTTP ' + res.status);
+        setStatus('ล้มเหลว', 'err');
+        return;
+      }
+      lastCode = data.code;
+      $('out').textContent = data.code;
+      $('outsize').textContent = fmt(data.size.output);
+      $('dl').disabled = false;
+      setStatus('สำเร็จใน ' + (data.elapsedMs/1000).toFixed(2) + ' s (รวม round-trip ' + (ms/1000).toFixed(2) + ' s)', 'ok');
+      $('stats').innerHTML =
+        '<span>input <b>' + fmt(data.size.input) + '</b></span>' +
+        '<span>output <b>' + fmt(data.size.output) + '</b></span>' +
+        '<span>ขยาย <b>' + (data.size.output / Math.max(1,data.size.input)).toFixed(1) + 'x</b></span>' +
+        '<span>server <b>' + data.elapsedMs + ' ms</b></span>';
+    } catch (e) {
+      $('out').textContent = String(e);
+      setStatus('เรียก API ไม่ได้ — ถ้าเปิดไฟล์นี้แบบ local ต้อง deploy ขึ้น Vercel ก่อน', 'err');
+    } finally {
+      $('go').disabled = false;
+    }
+  });
+
+  $('dl').addEventListener('click', function(){
+    if (!lastCode) return;
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([lastCode], {type:'text/plain'}));
+    a.download = 'obfuscated.lua';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  fetch('api/obfuscate').then(function(r){ return r.json(); }).then(function(d){
+    if (d && d.engine) $('engine').textContent = d.engine;
+  }).catch(function(){ $('engine').textContent = 'engine: offline'; });
+})();
+</script>
+</body>
+</html>

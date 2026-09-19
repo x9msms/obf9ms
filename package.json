@@ -1,0 +1,14 @@
+{
+  "name": "obf9ms",
+  "version": "1.0.0",
+  "private": true,
+  "description": "77fuscator (Lua 5.1 obfuscator, C#/.NET 8) exposed as a Vercel serverless HTTP API",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel deploy --prod",
+    "build:linux": "bash scripts/build-linux.sh"
+  }
+}

@@ -1,0 +1,37 @@
+# ---- .NET ----
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+*.user
+*.suo
+.vs/
+*.pdb
+
+# ---- Node / Vercel ----
+node_modules/
+.vercel/
+.env
+.env*.local
+npm-debug.log*
+
+# ---- build scratch ----
+*.luac
+luac.out
+out.lua
+out_unmin*.lua
+input_test.lua
+anti-tamper*.lua
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+
+# NOTE: api/vendor/ is intentionally NOT ignored.
+# The self-contained .NET binary, the Lua 5.1 shared library and darklua are
+# committed on purpose so that `vercel deploy` works with no build step and no
+# .NET SDK on the builder. See README.md ("สถาปัตยกรรม").

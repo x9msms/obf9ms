@@ -1,0 +1,68 @@
+This repository bundles code and binaries from several projects with different
+licenses. Nothing here adds a new license of its own.
+
+--------------------------------------------------------------------------
+1. 77fuscator (src/77fuscator-src/)
+--------------------------------------------------------------------------
+The upstream 77fuscator source archive shipped NO license file. All rights
+therefore remain with its author, and the copy in this repository is a
+verbatim copy (plus the two documented Linux fixes) of a publicly posted
+archive. Do not redistribute it further without the author's permission.
+
+Two files were modified to make the code run on .NET 8 / Linux. Both changes
+are described in detail in README.md ("บั๊ก 2 ตัวที่แก้เพื่อให้รันบน Linux ได้"):
+
+  - src/77fuscator-src/77main/Bytecode Library/Bytecode/Opcode.cs
+      moved the 7 BITWISE (Luau) opcodes from the middle of the enum to the
+      end, so that enum values 0..37 match the stock Lua 5.1 opcode table
+      that LuaCompiler-O.dll actually emits.
+
+  - src/77fuscator-src/77main/Bytecode Library/Bytecode/Deserializer.cs
+      fixed the inverted endianness test, which reversed every value read on
+      little-endian hosts.
+
+--------------------------------------------------------------------------
+2. Lua 5.1.5 (api/vendor/libLuaCompiler-O.so)
+--------------------------------------------------------------------------
+Copyright (C) 1994-2012 Lua.org, PUC-Rio.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+--------------------------------------------------------------------------
+3. darklua (api/vendor/darklua)
+--------------------------------------------------------------------------
+Copyright (c) 2021 jeparlefrancais and darklua contributors.
+MIT License. https://github.com/seaofvoices/darklua
+
+--------------------------------------------------------------------------
+4. Loretta (NuGet, linked into api/vendor/obf77)
+--------------------------------------------------------------------------
+MIT License. https://github.com/LorettaDevs/Loretta
+
+--------------------------------------------------------------------------
+5. Original work in this repository
+--------------------------------------------------------------------------
+  api/obfuscate.js
+  public/index.html
+  scripts/mock-vercel.js
+  scripts/build-linux.sh
+  src/obf77-cli/
+  vercel.json, package.json, README.md, .gitignore
+
+Written for this repository. Use freely.

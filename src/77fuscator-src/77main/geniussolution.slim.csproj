@@ -1,0 +1,30 @@
+<!--
+  Slim build of the 77fuscator core library.
+
+  The stock geniussolution.csproj pulls in Discord.Net + DSharpPlus + SimpleBase + Tsu,
+  none of which are referenced by any .cs file in this project (verified with grep).
+  This variant keeps only what the obfuscator actually needs, which cuts the
+  self-contained linux-x64 publish from ~81 MB down to ~35 MB - important because
+  it is what gets deployed to a Vercel serverless function.
+
+  Build with:  dotnet publish geniussolution.slim.csproj -c Release -r linux-x64 ...
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>geniussolution</AssemblyName>
+    <RootNamespace>geniussolution</RootNamespace>
+    <EnableDefaultCompileItems>true</EnableDefaultCompileItems>
+    <NoWarn>$(NoWarn);CS8632;CS0168;CS0219;CS0414;CS8509;CS8524</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Loretta.CodeAnalysis.Common" Version="0.2.12" />
+    <PackageReference Include="Loretta.CodeAnalysis.Lua" Version="0.2.12" />
+    <PackageReference Include="Loretta.CodeAnalysis.Lua.Experimental" Version="0.2.12" />
+    <PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />
+  </ItemGroup>
+
+</Project>
