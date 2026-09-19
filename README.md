@@ -18,6 +18,7 @@ POST /api/obfuscate
 - [หน้าเว็บทดสอบ](#หน้าเว็บทดสอบ)
 - [Settings](#settings)
 - [ข้อจำกัด (อ่านก่อนใช้)](#ข้อจำกัด-อ่านก่อนใช้)
+- [สถานะ production (วัดจริง)](#สถานะ-production-วัดจริง)
 - [Deploy ขึ้น Vercel](#deploy-ขึ้น-vercel)
 - [โครงสร้างรีโพ](#โครงสร้างรีโพ)
 - [ปัญหา 3 ตัวที่แก้เพื่อให้รันบน Linux/Vercel ได้](#ปัญหา-3-ตัวที่แก้เพื่อให้รันบน-linuxvercel-ได้)
@@ -110,7 +111,7 @@ const { ok, code: obfuscated, error } = await r.json();
 
 | หัวข้อ | ค่าที่วัดได้ |
 |---|---|
-| เวลาต่อ 1 คำขอ (script เล็ก) | **~3.0–3.7 วินาที** รวม .NET cold start |
+| เวลาต่อ 1 คำขอ (script เล็ก) | **~4.3 วินาที** วัดจริงบน Vercel Hobby (รวม .NET cold start) |
 | เวลา (script 9.4 KB / 150 locals) | ~3.6 วินาที → output 90 KB |
 | ขนาด input สูงสุด | 512 KB (ตั้งไว้ใน `api/obfuscate.js`) |
 | ขนาด output สูงสุด | 12 MB |
@@ -129,9 +130,44 @@ const { ok, code: obfuscated, error } = await r.json();
 
 ---
 
+## สถานะ production (วัดจริง)
+
+Deploy แล้วที่ **https://obf9ms.vercel.app** — ผลการตรวจบน runtime จริงของ Vercel:
+
+```
+GET /api/obfuscate?health=1
+  ok       : true
+  glibc    : 2.34                 (Amazon Linux)
+  node     : v24.20.0  linux/x64
+  openssl  : 3.5.7  -> /lib64/libssl.so.3, /lib64/libcrypto.so.3
+  selfTest : ok, ~4.4s, output 54,896 bytes
+```
+
+| เคส | ผล |
+|---|---|
+| `POST` script ปกติ | `200` · 135 B → 59,638 B · 4.17s · output รันด้วย Lua 5.1 ได้ผลตรงต้นฉบับทุกบรรทัด |
+| request ซ้ำ 3 ครั้ง (warm) | 4.48s / 4.32s / 4.28s |
+| `settings.Watermark` กำหนดเอง | `200` · watermark ปรากฏใน output จริง |
+| `ExtraCompression: false` | `200` · output ใหญ่ขึ้น (8 B → 71,628 B) ตามคาด |
+| `download: true` | `200` · `text/plain` + `Content-Disposition: attachment` |
+| Lua ที่ไม่ถูกต้อง | `400` ใน 0.29s |
+| input ว่าง | `400` |
+| เกิน 200 locals | `400` พร้อมคำอธิบายวิธีแก้ |
+| `GET /api/obfuscate` (usage) | `200` ใน 0.20s |
+
+**หัวห้องที่เหลือ:** ~4.3s จากเพดาน 10s ของ Hobby → เหลือ ~5.7s
+ถ้า script ใหญ่ขึ้นจนเฉียดเพดาน ทางเลือกคืออัปเกรดเป็น Pro (ได้ `maxDuration: 60` ตามที่ตั้งไว้แล้วใน `vercel.json`)
+
+> ค่าคงที่ ~3s ต่อคำขอคือตอน .NET runtime เริ่มทำงาน ไม่ใช่เวลา obfuscate จริง
+> ถ้าอยากลด ให้เปลี่ยนจาก single-file เป็น multi-file publish (วัดในเครื่องแล้วเร็วกว่า ~0.9s
+> เพราะไม่ต้อง extract bundle) แลกกับขนาดที่ commit เข้ารีโพเพิ่มจาก 35 MB เป็น 73 MB
+
+---
+
 ## Deploy ขึ้น Vercel
 
-ไบนารีทั้งหมด commit ไว้ในรีโพแล้ว (`api/vendor/`, ~46 MB) ดังนั้น **deploy ได้เลยไม่ต้อง build อะไรเพิ่ม**
+รีโพนี้ออนไลน์อยู่แล้วที่ https://obf9ms.vercel.app — ไบนารีทั้งหมด commit ไว้ใน `api/vendor/` (~46 MB)
+ดังนั้นถ้าจะ deploy ใหม่ (fork หรือ clone) **ไม่ต้อง build อะไรเพิ่ม**
 
 ```bash
 npm i -g vercel
