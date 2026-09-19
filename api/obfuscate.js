@@ -59,7 +59,7 @@ module.exports = async function handler(req, res) {
   if (req.method === 'GET') {
     const query = req.query || {};
     if (query.health === '1' || query.health === 'true') {
-      return res.status(200).json(await healthCheck());
+      return res.status(200).json(await healthCheck(query));
     }
     return res.status(200).json(usage());
   }
@@ -100,7 +100,9 @@ module.exports = async function handler(req, res) {
     fs.writeFileSync(settingsFile, JSON.stringify(settings), 'utf8');
 
     const bin = await ensureExecutable(BINARY, work);
-    const result = await runObfuscator(bin, work, inputFile, outputFile, settingsFile);
+    const result = await runObfuscator(bin, work, inputFile, outputFile, settingsFile, {
+      opensslOverride: (req.query && req.query.ossl) || process.env.CLR_OPENSSL_VERSION_OVERRIDE || null,
+    });
 
     if (!result.ok) {
       const classified = classifyError(result.error);
@@ -261,34 +263,51 @@ async function ensureExecutable(bin, work) {
   }
 }
 
-function runObfuscator(bin, work, inputFile, outputFile, settingsFile) {
+function runObfuscator(bin, work, inputFile, outputFile, settingsFile, opts) {
+  opts = opts || {};
   return new Promise((resolve) => {
-    const child = spawn(
-      bin,
-      [inputFile, outputFile, settingsFile],
-      {
-        cwd: work,
-        env: {
-          PATH: `${VENDOR}:${process.env.PATH || '/usr/bin:/bin'}`,
-          // The .NET single-file host extracts its bundle to DOTNET_BUNDLE_EXTRACT_BASE_DIR
-          // and reports THAT as AppContext.BaseDirectory, so the native-library probe
-          // for "LuaCompiler-O.dll" does not look next to the real binary. Put the
-          // vendor dir on the loader search path as well - the LuaCompiler-O.dll
-          // symlink living there is what actually gets opened.
-          LD_LIBRARY_PATH: [VENDOR, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':'),
-          HOME: work,
-          TMPDIR: work,
-          DOTNET_ROOT: '',
-          DOTNET_CLI_TELEMETRY_OPTOUT: '1',
-          DOTNET_noLogo: '1',
-          // Let the .NET single-file bundler extract next to the work dir
-          // instead of a path that may not exist on Vercel.
-          DOTNET_BUNDLE_EXTRACT_BASE_DIR: path.join(work, '.net'),
-          LANG: 'C.UTF-8',
-        },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      }
-    );
+    const env = {
+      PATH: `${VENDOR}:${process.env.PATH || '/usr/bin:/bin'}`,
+      // The .NET single-file host extracts its bundle to
+      // DOTNET_BUNDLE_EXTRACT_BASE_DIR and reports THAT as
+      // AppContext.BaseDirectory, so its native-library probe for
+      // "LuaCompiler-O.dll" never looks next to the real binary. Putting the
+      // vendor dir on the loader search path makes the LuaCompiler-O.dll
+      // symlink reachable either way. The /usr/lib64-style entries are there so
+      // .NET can also find libssl/libcrypto on RPM-based runtimes.
+      LD_LIBRARY_PATH: [
+        VENDOR,
+        '/usr/lib64',
+        '/usr/lib',
+        '/lib64',
+        process.env.LD_LIBRARY_PATH,
+      ].filter(Boolean).join(':'),
+      HOME: work,
+      TMPDIR: work,
+      DOTNET_ROOT: '',
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1',
+      DOTNET_noLogo: '1',
+      // Let the single-file bundler extract into the scratch dir instead of a
+      // path that may not exist (or be writable) on Vercel.
+      DOTNET_BUNDLE_EXTRACT_BASE_DIR: path.join(work, '.net'),
+      LANG: 'C.UTF-8',
+    };
+
+    // .NET picks an OpenSSL shim by probing sonames. 77fuscator calls
+    // RandomNumberGenerator.GetInt32() all over the pipeline, so OpenSSL is
+    // mandatory. On some runtimes .NET lands on the 1.0/1.1 shim and dies with
+    //   "Cannot get required symbol EVP_rc2_cbc from libssl"
+    // because OpenSSL 3 moved RC2 into the legacy provider. This override lets
+    // us pin a version without redeploying:  ?ossl=3
+    if (opts.opensslOverride) {
+      env.CLR_OPENSSL_VERSION_OVERRIDE = String(opts.opensslOverride);
+    }
+
+    const child = spawn(bin, [inputFile, outputFile, settingsFile], {
+      cwd: work,
+      env: env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
 
     let stdout = '';
     let stderr = '';
@@ -306,8 +325,14 @@ function runObfuscator(bin, work, inputFile, outputFile, settingsFile) {
       finish({ ok: false, error: `timeout after ${KILL_AFTER_MS}ms`, stderr });
     }, KILL_AFTER_MS);
 
-    child.stdout.on('data', (d) => { stdout += d; if (stdout.length > 1e6) stdout = stdout.slice(-1e6); });
-    child.stderr.on('data', (d) => { stderr += d; if (stderr.length > 1e6) stderr = stderr.slice(-1e6); });
+    child.stdout.on('data', (d) => {
+      stdout += d;
+      if (stdout.length > 1e6) stdout = stdout.slice(-1e6);
+    });
+    child.stderr.on('data', (d) => {
+      stderr += d;
+      if (stderr.length > 1e6) stderr = stderr.slice(-1e6);
+    });
 
     child.on('error', (err) =>
       finish({ ok: false, error: `spawn failed: ${err.message}`, stderr })
@@ -319,6 +344,7 @@ function runObfuscator(bin, work, inputFile, outputFile, settingsFile) {
       }
       const lastErr =
         (stderr.match(/ERR:.*$/m) || [])[0] ||
+        (stderr.match(/Cannot get required symbol.*/m) || [])[0] ||
         (stderr.match(/System\.[A-Za-z.]*Exception:.*/m) || [])[0] ||
         stderr.trim().split('\n').slice(-3).join(' | ') ||
         stdout.trim().split('\n').slice(-3).join(' | ') ||
@@ -328,13 +354,18 @@ function runObfuscator(bin, work, inputFile, outputFile, settingsFile) {
   });
 }
 
-async function healthCheck() {
+async function healthCheck(query) {
+  query = query || {};
+  const ossl = query.ossl ? String(query.ossl) : null;
+
   const report = {
     ok: false,
     vendorDir: VENDOR,
     node: process.version,
     platform: `${process.platform}/${process.arch}`,
     glibc: detectGlibc(),
+    openssl: probeOpenSSL(),
+    opensslOverride: ossl,
     checks: {},
   };
   for (const f of ['obf77', 'darklua', 'darkluaconfig.json', 'libLuaCompiler-O.so', 'LuaCompiler-O.dll']) {
@@ -356,7 +387,9 @@ async function healthCheck() {
     fs.writeFileSync(settingsFile, JSON.stringify(DEFAULT_SETTINGS), 'utf8');
     const bin = await ensureExecutable(BINARY, work);
     const t = Date.now();
-    const r = await runObfuscator(bin, work, inputFile, outputFile, settingsFile);
+    const r = await runObfuscator(bin, work, inputFile, outputFile, settingsFile, {
+      opensslOverride: ossl,
+    });
     report.selfTest = {
       ...r,
       stderr: undefined,
@@ -370,6 +403,46 @@ async function healthCheck() {
     if (work) fs.rmSync(work, { recursive: true, force: true });
   }
   return report;
+}
+
+/**
+ * Lists the OpenSSL shared objects the runtime actually has, and what
+ * `openssl version` says. .NET needs a libssl/libcrypto it can dlopen; when it
+ * picks the wrong shim the failure is "Cannot get required symbol EVP_rc2_cbc".
+ */
+function probeOpenSSL() {
+  const dirs = [
+    '/usr/lib64', '/usr/lib', '/lib64', '/lib',
+    '/usr/lib/x86_64-linux-gnu', '/lib/x86_64-linux-gnu',
+    '/usr/local/lib64', '/usr/local/lib',
+  ];
+  const found = [];
+  for (const dir of dirs) {
+    let entries;
+    try { entries = fs.readdirSync(dir); } catch { continue; }
+    for (const name of entries) {
+      if (!/^(libssl|libcrypto)\.so/.test(name)) continue;
+      let size = null;
+      try { size = fs.statSync(path.join(dir, name)).size; } catch { /* ignore */ }
+      found.push({ path: path.join(dir, name), bytes: size });
+    }
+  }
+
+  let version = null;
+  try {
+    version = require('child_process')
+      .execFileSync('openssl', ['version'], { encoding: 'utf8', timeout: 5000 })
+      .trim();
+  } catch (e) {
+    version = 'openssl CLI not available';
+  }
+
+  // What node itself links against is a good hint for what .NET should use.
+  return {
+    nodeOpenSSL: (process.versions && process.versions.openssl) || null,
+    cliVersion: version,
+    libs: found.sort(function (a, b) { return a.path < b.path ? -1 : 1; }),
+  };
 }
 
 /**
